@@ -8,6 +8,9 @@ import sys
 import time
 import traceback
 from datetime import datetime
+import log
+
+log.LogInfo("PYTHON VERSION: " + sys.version)
 
 import requests
 
@@ -28,7 +31,6 @@ try:
     import renamerOnUpdate_config as config
 except Exception:
     import config
-import log
 
 
 DB_VERSION_FILE_REFACTOR = 32
@@ -428,10 +430,16 @@ def get_template_path(scene: dict):
             key_list = key.split(TAGS_SPLITCHAR)
             # log.LogWarning(f"fine4")
             if set(key_list).issubset(set(tags)):
+                # TODO: if file in a subdir, move the whole dir?
                 # log.LogWarning(f"fine5")
                 destination = config.p_tag_templates[key]
+                # check that it's not already in the right dir or subdir
+                if scene["path"].startswith(destination):
+                    log.LogInfo(f"NOT moving '{scene['path']}' to '{destination}': it's already nested within")
+                    # don't move it
+                    break
                 # log.LogWarning(f"fine6")
-                log.LogWarning(f"moving '{scene['path']}' to '{destination}'")
+                log.LogInfo(f"moving '{scene['path']}' to '{destination}'")
                 # log.LogWarning(f"fine7")
                 template["destination"] = destination
                 # log.LogWarning(f"fine8")
