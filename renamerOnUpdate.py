@@ -1,6 +1,7 @@
 import difflib
 import json
 import os
+from pathlib import PurePath
 import re
 import shutil
 import sqlite3
@@ -250,8 +251,6 @@ def graphql_findScenebyPath(path, modifier) -> dict:
     result = callGraphQL(query, variables)
     return result.get("findScenes")
 
-
-
 def graphql_getConfiguration():
     query = """
         query Configuration {
@@ -284,6 +283,71 @@ def graphql_getStudio(studio_id):
     }
     result = callGraphQL(query, variables)
     return result.get("findStudio")
+
+def graphql_getAllTags():
+    query = """
+        query AllTagsForFilter {
+            allTags {
+                id
+                name
+                aliases
+                __typename
+            }
+        }
+    """
+    variables = {}
+    result = callGraphQL(query, variables)
+    return result.get("allTags")
+
+def graphql_getAllStudios():
+    query = """
+        query FindStudios($studio_filter: StudioFilterType) {
+            findStudios(studio_filter: $studio_filter) {
+              count
+              studios {
+                ...StudioData
+                __typename
+              }
+              __typename
+            }
+          }
+          
+          fragment StudioData on Studio {
+            id
+            name
+            __typename
+          }
+    """
+    variables = {
+        "studio_filter": {}
+    }
+    result = callGraphQL(query, variables)
+    return result.get("findStudios")
+
+def graphql_getAllPerformers():
+    query = """
+        query FindPerformers($performer_filter: PerformerFilterType) {
+            findPerformers(performer_filter: $performer_filter) {
+              count
+              performers {
+                ...PerformerData
+                __typename
+              }
+              __typename
+            }
+          }
+          
+          fragment PerformerData on Performer {
+            id
+            name
+            __typename
+          }
+    """
+    variables = {
+        "performer_filter": {}
+    }
+    result = callGraphQL(query, variables)
+    return result.get("findPerformers")
 
 
 def graphql_removeScenesTag(id_scenes: list, id_tags: list):
@@ -401,8 +465,38 @@ def get_template_filename(scene: dict):
     return template
 
 
+def is_scene_movable(scene: dict) -> bool:
+    if IGNORE_UNKNOWN_PARENT_DIRECTORIES:
+        absolute_path = PurePath(scene["path"])
+        absolute_path_parts = absolute_path.parts
+
+        parent_directory = ""
+        if len(absolute_path_parts) == 0:
+            return True
+        elif len(absolute_path_parts) == 1:
+            parent_directory = absolute_path_parts[1]
+        else:
+            parent_directory = absolute_path_parts[len(absolute_path_parts) - 2]
+
+        for tag in ALL_TAGS:
+            if (tag.lower() in parent_directory.lower()):
+                return True
+        for studio in ALL_STUDIOS:
+            if (studio.lower() in parent_directory.lower()):
+                return True
+        for performer in ALL_PERFORMERS:
+            if (performer.lower() in parent_directory.lower()):
+                return True
+        log.LogWarning(f"Will NOT move '{absolute_path}' because it is in an unknown parent directory (a parent directory that does not contain '{ALL_TAGS}', '{ALL_STUDIOS}', or '{ALL_PERFORMERS}')")
+        return False
+    return True
+
 def get_template_path(scene: dict):
     template = {"destination": "", "option": [], "opt_details": {}}
+
+    if not is_scene_movable(scene):
+        return template
+    
     # Change by Path
     if config.p_path_templates:
         for match, job in config.p_path_templates.items():
@@ -427,6 +521,7 @@ def get_template_path(scene: dict):
             key_list = key.split(TAGS_SPLITCHAR)
             if set(key_list).issubset(set(tags)):
                 # TODO: if file in a subdir, move the whole dir?
+                # TODO: if file in a non-tag subdir (e.g., tag, studio, performer), ignore?
                 destination = config.p_tag_templates[key]
                 # check that it's not already in the right dir or subdir
                 if scene["path"].startswith(destination):
@@ -1106,7 +1201,7 @@ def renamer(scene_id, db_conn=None):
             template["filename"] = config.default_template
 
         if not template["filename"] and not template["path"]:
-            log.LogWarning(f"[{scene_id}] No template for this scene.")
+            log.LogDebug(f"[{scene_id}] No template for this scene.")
             return
 
         #log.LogDebug("Using this template: {}".format(filename_template))
@@ -1264,6 +1359,16 @@ LOGFILE = config.log_file
 STASH_CONFIG = graphql_getConfiguration()
 STASH_DATABASE = STASH_CONFIG['general']['databasePath']
 
+def extract_name(l):
+    return list(map(lambda x: x['name'], l))
+
+ALL_TAGS = extract_name(graphql_getAllTags())
+log.LogDebug(f"All Tags: '{ALL_TAGS}'")
+ALL_STUDIOS = extract_name(graphql_getAllStudios()['studios'])
+log.LogDebug(f"All Studios: '{ALL_STUDIOS}'")
+ALL_PERFORMERS = extract_name(graphql_getAllPerformers()['performers'])
+log.LogDebug(f"All Performers: '{ALL_PERFORMERS}'")
+
 # READING CONFIG
 
 ASSOCIATED_EXT = config.associated_extension
@@ -1297,6 +1402,8 @@ RATING_FORMAT = config.rating_format
 TAGS_SPLITCHAR = config.tags_splitchar
 TAGS_WHITELIST = config.tags_whitelist
 TAGS_BLACKLIST = config.tags_blacklist
+
+IGNORE_UNKNOWN_PARENT_DIRECTORIES = config.ignore_unknown_parent_directories
 
 IGNORE_PATH_LENGTH = config.ignore_path_length
 
